@@ -1,0 +1,19 @@
+# SingleHDR service — single command deployment
+#
+# Usage:
+#   cd service && docker compose up -d --build
+#
+# First build downloads model weights (~800MB) and converts them.
+# Subsequent builds use Docker cache and are fast.
+
+services:
+  singlehdr:
+    build:
+      context: ..
+      dockerfile: service/backend/Dockerfile
+    ports:
+      - "80:8000"
+    environment:
+      - JOB_TTL_HOURS=24
+      - MAX_MEGAPIXELS=16
+    restart: unless-stopped

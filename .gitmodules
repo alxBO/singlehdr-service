@@ -1,0 +1,3 @@
+[submodule "vendor/SingleHDR"]
+	path = vendor/SingleHDR
+	url = https://github.com/alex04072000/SingleHDR.git

@@ -1,0 +1,14 @@
+.git
+.github
+.vscode
+.claude
+.DS_Store
+__pycache__
+*.pyc
+venv/
+ckpt/
+ckpt.zip
+service/weights/
+service/outputs/
+*.md
+!vendor/SingleHDR/**

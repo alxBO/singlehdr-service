@@ -155,7 +155,7 @@ class TorchBasicPipeline:
     def _clear_device_cache():
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
 
     def close(self):
@@ -250,7 +250,7 @@ class TorchRefinementPipeline:
     def _clear_device_cache():
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
 
     def close(self):

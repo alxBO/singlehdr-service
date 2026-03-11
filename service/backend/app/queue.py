@@ -180,9 +180,6 @@ class JobQueue:
             job.hdr_analysis = hdr_analysis
             job.mode = req.mode
 
-            # Free input bytes — no longer needed
-            job.input_bytes = None
-
             job.stage = "complete"
             job.progress = 1.0
             job.message = "Done"

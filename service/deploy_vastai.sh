@@ -31,7 +31,7 @@ echo ""
 
 # 1. Install Python dependencies
 echo "[1/3] Installing dependencies..."
-pip install -r "$SCRIPT_DIR/backend/requirements-torch.txt"
+pip install -q -r "$SCRIPT_DIR/backend/requirements-torch.txt"
 
 # 2. Download and convert weights if needed
 if [ ! -f "$SCRIPT_DIR/weights/basic/dequantization.pt" ]; then

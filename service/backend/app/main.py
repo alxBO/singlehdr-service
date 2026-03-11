@@ -244,6 +244,19 @@ async def status_sse(job_id: str):
     )
 
 
+@app.get("/api/status-poll/{job_id}")
+async def status_poll(job_id: str):
+    if job_id not in app.state.jobs:
+        raise HTTPException(404, "Job not found")
+    job = app.state.jobs[job_id]
+    return {
+        "stage": job.stage,
+        "progress": round(job.progress, 3),
+        "message": job.message,
+        "queue_position": job.queue_position,
+    }
+
+
 @app.get("/api/result/{job_id}", response_model=ResultResponse)
 async def result(job_id: str):
     if job_id not in app.state.jobs:

@@ -47,7 +47,7 @@ async function handleFiles(files) {
     hide($('#error-section'));
     hide($('#progress-section'));
     hdrData = null;
-    if (evtSource) { evtSource.close(); evtSource = null; }
+    stopProgress();
 
     if (validFiles.length === 1) {
         // Single file mode
@@ -364,24 +364,53 @@ function waitForCompletion(jobId) {
     return new Promise((resolve) => {
         let done = false;
         let lastMessage = '';
+        let sseGotMessage = false;
+        let batchPollTimer = null;
         const es = new EventSource(`/api/status/${jobId}`);
 
         function finish(result) {
             if (done) return;
             done = true;
             es.close();
+            if (batchPollTimer) { clearInterval(batchPollTimer); batchPollTimer = null; }
             resolve(result);
         }
 
-        es.onmessage = (e) => {
-            const data = JSON.parse(e.data);
+        function handleData(data) {
             updateProgress(data);
             lastMessage = data.message || '';
             if (data.stage === 'complete') finish({ ok: true });
             else if (data.stage === 'error') finish({ ok: false, message: data.message });
             else if (data.stage === 'cancelled') finish({ ok: false, message: 'Cancelled' });
+        }
+
+        function startBatchPolling() {
+            if (batchPollTimer) return;
+            batchPollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch(`/api/status-poll/${jobId}`);
+                    if (!resp.ok) return;
+                    handleData(await resp.json());
+                } catch (e) { /* retry next tick */ }
+            }, 1000);
+        }
+
+        es.onmessage = (e) => {
+            sseGotMessage = true;
+            handleData(JSON.parse(e.data));
         };
-        es.onerror = () => finish({ ok: false, message: lastMessage || 'Server connection lost' });
+        es.onerror = () => {
+            es.close();
+            if (!sseGotMessage) startBatchPolling();
+            else finish({ ok: false, message: lastMessage || 'Server connection lost' });
+        };
+
+        setTimeout(() => {
+            if (!sseGotMessage && !done) {
+                es.close();
+                startBatchPolling();
+            }
+        }, 3000);
     });
 }
 
@@ -393,37 +422,68 @@ $('#cancel-btn').addEventListener('click', async () => {
     } catch (e) { /* ignore */ }
 });
 
-// --- SSE Progress (single mode) ---
+// --- SSE Progress (with polling fallback for Cloudflare tunnels) ---
+let pollTimer = null;
+
 function startSSE(jobId) {
     if (evtSource) evtSource.close();
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 
+    let sseGotMessage = false;
     evtSource = new EventSource(`/api/status/${jobId}`);
-    evtSource.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        updateProgress(data);
 
-        if (data.stage === 'complete') {
-            evtSource.close();
-            evtSource = null;
-            loadResult(jobId);
-        } else if (data.stage === 'error') {
-            evtSource.close();
-            evtSource = null;
-            showError(data.message);
-            hide($('#progress-section'));
-            $('#generate-btn').disabled = false;
-        } else if (data.stage === 'cancelled') {
-            evtSource.close();
-            evtSource = null;
-            hide($('#progress-section'));
-            $('#generate-btn').disabled = false;
-        }
+    evtSource.onmessage = (e) => {
+        sseGotMessage = true;
+        handleStatusUpdate(jobId, JSON.parse(e.data));
     };
 
     evtSource.onerror = () => {
         evtSource.close();
         evtSource = null;
+        if (!sseGotMessage) startPolling(jobId);
     };
+
+    setTimeout(() => {
+        if (!sseGotMessage && evtSource) {
+            evtSource.close();
+            evtSource = null;
+            startPolling(jobId);
+        }
+    }, 3000);
+}
+
+function startPolling(jobId) {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/status-poll/${jobId}`);
+            if (!resp.ok) return;
+            handleStatusUpdate(jobId, await resp.json());
+        } catch (e) { /* retry next tick */ }
+    }, 1000);
+}
+
+function handleStatusUpdate(jobId, data) {
+    updateProgress(data);
+
+    if (data.stage === 'complete') {
+        stopProgress();
+        loadResult(jobId);
+    } else if (data.stage === 'error') {
+        stopProgress();
+        showError(data.message);
+        hide($('#progress-section'));
+        $('#generate-btn').disabled = false;
+    } else if (data.stage === 'cancelled') {
+        stopProgress();
+        hide($('#progress-section'));
+        $('#generate-btn').disabled = false;
+    }
+}
+
+function stopProgress() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
 function updateProgress(data) {

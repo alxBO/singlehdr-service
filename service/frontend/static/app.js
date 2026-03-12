@@ -11,6 +11,7 @@ let evtSource = null;
 let hdrData = null; // { width, height, pixels: Float32Array }
 let inputLocalUrl = null;
 let inputLinearMetrics = null;
+let sdrLinearData = null;
 
 // Batch state
 let batchQueue = []; // [{ file, jobId, status, data, errorMsg }]
@@ -47,6 +48,7 @@ async function handleFiles(files) {
     hide($('#error-section'));
     hide($('#progress-section'));
     hdrData = null;
+    sdrLinearData = null;
     stopProgress();
 
     if (validFiles.length === 1) {
@@ -194,9 +196,11 @@ function showBatchItem(idx) {
     if (item.status === 'complete' && item.data && item.data.resultData) {
         displayResult(item.data.resultData);
         loadHdrData(item.jobId);
+        loadSdrLinearData();
     } else {
         hide($('#result-section'));
         hdrData = null;
+        sdrLinearData = null;
     }
 }
 
@@ -214,6 +218,7 @@ function displayInputInfo(data) {
 
     // Store for comparison with HDR result
     inputLinearMetrics = {
+        min: data.min_luminance_linear,
         mean: data.mean_luminance_linear,
         peak: data.peak_luminance_linear,
         contrast: data.contrast_ratio,
@@ -235,6 +240,9 @@ $('#gamma-slider').addEventListener('input', (e) => {
     applyClientTonemap();
 });
 $('#tonemap-select').addEventListener('change', () => {
+    applyClientTonemap();
+});
+$('#sdr-exposure-toggle').addEventListener('change', () => {
     applyClientTonemap();
 });
 
@@ -516,6 +524,7 @@ async function loadResult(jobId) {
 
         // Load HDR data for client-side tone mapping
         await loadHdrData(jobId);
+        loadSdrLinearData();
 
         hide($('#progress-section'));
         $('#generate-btn').disabled = false;
@@ -540,6 +549,11 @@ function displayResult(data) {
     // Fill comparison table (SDR input vs HDR output, both in linear domain)
     const inM = inputLinearMetrics;
     if (inM) {
+        $('#cmp-input-min').textContent = (inM.min || 0).toFixed(6);
+        $('#cmp-output-min').textContent = (a.min_luminance || 0).toFixed(6);
+        const ratioMin = inM.min > 0 ? (a.min_luminance || 0) / inM.min : 0;
+        $('#cmp-ratio-min').textContent = ratioMin.toFixed(2) + 'x';
+
         $('#cmp-input-mean').textContent = inM.mean.toFixed(4);
         $('#cmp-output-mean').textContent = a.mean_luminance.toFixed(4);
         const ratioMean = inM.mean > 0 ? a.mean_luminance / inM.mean : 0;
@@ -556,6 +570,9 @@ function displayResult(data) {
         const ratioContrast = inM.contrast > 0 ? a.contrast_ratio / inM.contrast : 0;
         $('#cmp-ratio-contrast').textContent = ratioContrast.toFixed(1) + 'x';
     } else {
+        $('#cmp-input-min').textContent = '\u2014';
+        $('#cmp-output-min').textContent = (a.min_luminance || 0).toFixed(6);
+        $('#cmp-ratio-min').textContent = '\u2014';
         $('#cmp-input-mean').textContent = '—';
         $('#cmp-output-mean').textContent = a.mean_luminance.toFixed(4);
         $('#cmp-ratio-mean').textContent = '—';
@@ -586,6 +603,40 @@ function formatContrast(ratio) {
     return ratio.toFixed(0) + ':1';
 }
 
+// --- SDR Linear Data ---
+function loadSdrLinearData() {
+    if (!inputLocalUrl) return;
+    const img = new Image();
+    img.onload = () => {
+        let w = img.naturalWidth;
+        let h = img.naturalHeight;
+
+        const maxDim = 1024;
+        if (Math.max(w, h) > maxDim) {
+            const scale = maxDim / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const imageData = ctx.getImageData(0, 0, w, h);
+
+        const pixels = new Float32Array(w * h * 3);
+        for (let i = 0; i < w * h; i++) {
+            pixels[i * 3] = Math.pow(imageData.data[i * 4] / 255, 2.2);
+            pixels[i * 3 + 1] = Math.pow(imageData.data[i * 4 + 1] / 255, 2.2);
+            pixels[i * 3 + 2] = Math.pow(imageData.data[i * 4 + 2] / 255, 2.2);
+        }
+
+        sdrLinearData = { width: w, height: h, pixels };
+    };
+    img.src = inputLocalUrl;
+}
+
 // --- Client-side Tone Mapping ---
 async function loadHdrData(jobId) {
     try {
@@ -605,28 +656,24 @@ async function loadHdrData(jobId) {
     }
 }
 
-function applyClientTonemap() {
-    if (!hdrData) return;
+function renderLinearToCanvas(canvas, data, exposureMul, tonemap, gamma, displayW, displayH) {
+    const { width: srcW, height: srcH, pixels } = data;
 
-    const { width, height, pixels } = hdrData;
-    const exposure = parseFloat($('#exposure-slider').value);
-    const tonemap = $('#tonemap-select').value;
-    const gamma = parseFloat($('#gamma-slider').value);
-    const exposureMul = Math.pow(2, exposure);
+    canvas.width = displayW;
+    canvas.height = displayH;
 
-    const canvas = $('#compare-canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    const imgData = ctx.createImageData(width, height);
+    const offscreen = document.createElement('canvas');
+    offscreen.width = srcW;
+    offscreen.height = srcH;
+    const offCtx = offscreen.getContext('2d');
+    const imgData = offCtx.createImageData(srcW, srcH);
     const out = imgData.data;
 
-    for (let i = 0; i < width * height; i++) {
+    for (let i = 0; i < srcW * srcH; i++) {
         let r = Math.max(0, pixels[i * 3]) * exposureMul;
         let g = Math.max(0, pixels[i * 3 + 1]) * exposureMul;
         let b = Math.max(0, pixels[i * 3 + 2]) * exposureMul;
 
-        // Tone mapping
         if (tonemap === 'aces') {
             r = tonemapAces(r);
             g = tonemapAces(g);
@@ -641,7 +688,6 @@ function applyClientTonemap() {
             b = Math.min(b, 1);
         }
 
-        // Gamma
         r = applyGamma(r, gamma);
         g = applyGamma(g, gamma);
         b = applyGamma(b, gamma);
@@ -653,7 +699,37 @@ function applyClientTonemap() {
         out[idx + 3] = 255;
     }
 
-    ctx.putImageData(imgData, 0, 0);
+    offCtx.putImageData(imgData, 0, 0);
+
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(offscreen, 0, 0, displayW, displayH);
+}
+
+function applyClientTonemap() {
+    if (!hdrData) return;
+
+    const exposure = parseFloat($('#exposure-slider').value);
+    const tonemap = $('#tonemap-select').value;
+    const gamma = parseFloat($('#gamma-slider').value);
+    const exposureMul = Math.pow(2, exposure);
+
+    const compareImg = $('#compare-input');
+    const displayW = compareImg.naturalWidth || hdrData.width;
+    const displayH = compareImg.naturalHeight || hdrData.height;
+
+    // Render HDR
+    renderLinearToCanvas($('#compare-canvas'), hdrData, exposureMul, tonemap, gamma, displayW, displayH);
+
+    // Render SDR with same exposure if toggle is on
+    const sdrCanvas = $('#compare-sdr-canvas');
+    if ($('#sdr-exposure-toggle').checked && sdrLinearData) {
+        sdrCanvas.classList.add('active');
+        renderLinearToCanvas(sdrCanvas, sdrLinearData, exposureMul, tonemap, gamma, displayW, displayH);
+    } else {
+        sdrCanvas.classList.remove('active');
+    }
 }
 
 function tonemapAces(x) {

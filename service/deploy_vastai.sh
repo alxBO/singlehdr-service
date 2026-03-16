@@ -48,7 +48,7 @@ if [ ! -f "$SCRIPT_DIR/weights/basic/dequantization.pt" ]; then
     echo "Found checkpoints at: $CKPT_ROOT"
 
     cd "$SCRIPT_DIR/backend"
-    python convert_weights.py --mode both \
+    python3 convert_weights.py --mode both \
         --ckpt_deq "$CKPT_ROOT/ckpt_deq/model.ckpt" \
         --ckpt_lin "$CKPT_ROOT/ckpt_lin/model.ckpt" \
         --ckpt_hal "$CKPT_ROOT/ckpt_hal/model.ckpt" \

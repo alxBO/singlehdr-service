@@ -34,7 +34,7 @@ echo "[1/3] Installing dependencies..."
 pip install -q -r "$SCRIPT_DIR/backend/requirements-torch.txt"
 
 # 2. Download and convert weights if needed
-if [ ! -f "$SCRIPT_DIR/weights/basic/dequantization.pt" ]; then
+if [ ! -f "$SCRIPT_DIR/weights/basic/dequantization.pt" ] || [ ! -f "$SCRIPT_DIR/weights/refinement/dequantization.pt" ]; then
     echo "[2/3] Downloading and converting model weights..."
     pip install gdown tensorflow-cpu
 
